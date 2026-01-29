@@ -12,7 +12,7 @@ class RoomSelectionViewModel: ObservableObject {
     
     // Pagination
     @Published var currentPage = 0
-    let roomsPerPage = 5
+    let roomsPerPage = 6
     
     // DEBUG MODE: Toggle to show all rooms unlocked for testing
     @AppStorage("debugMode") var debugMode: Bool = false

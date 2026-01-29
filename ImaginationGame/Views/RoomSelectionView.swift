@@ -118,6 +118,22 @@ struct RoomSelectionView: View {
                                         }
                                     )
                                 }
+                                
+                                // Show "Coming Soon" text only on last page
+                                if viewModel.currentPage == viewModel.totalPages - 1 {
+                                    VStack(spacing: 8) {
+                                        Text("✨ NEW ROOMS COMING SOON ✨")
+                                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color.cyan)
+                                        
+                                        Text("More challenging puzzles are being crafted. Stay tuned!")
+                                            .font(.system(size: 11, design: .monospaced))
+                                            .foregroundColor(Color.cyan.opacity(0.7))
+                                            .multilineTextAlignment(.center)
+                                    }
+                                    .padding(.vertical, 20)
+                                    .frame(maxWidth: .infinity)
+                                }
                             }
                             .padding(.horizontal)
                             .padding(.top, 8)
@@ -222,12 +238,6 @@ struct RoomCard: View {
                     Text(room.roomName)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundColor(isUnlocked ? Color.green : Color.gray)
-                    
-                    Text(room.description)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor((isUnlocked ? Color.green : Color.gray).opacity(0.7))
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 
                 Spacer()
