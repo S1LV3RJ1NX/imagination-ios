@@ -290,7 +290,7 @@ class GameViewModel: ObservableObject {
     
     private func startLoadingMessageRotation() {
         loadingMessageIndex = 0
-        loadingMessageTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+        loadingMessageTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.loadingMessageIndex = (self.loadingMessageIndex + 1) % self.loadingMessages.count
             self.currentLoadingMessage = self.loadingMessages[self.loadingMessageIndex]
