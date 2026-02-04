@@ -183,6 +183,15 @@ class GameViewModel: ObservableObject {
                     self.hintsUnlocked = Int(response.hintsUnlocked)
                     self.gamePhase = GamePhase(rawValue: response.phase) ?? .playing
                     
+                    // IMPORTANT: Update session_id in case backend auto-recovered from a lost session
+                    // This handles backend restarts gracefully
+                    if self.sessionId != response.sessionId {
+                        #if DEBUG
+                        print("⚠️ Session ID changed (backend auto-recovery): \(self.sessionId ?? "nil") -> \(response.sessionId)")
+                        #endif
+                        self.sessionId = response.sessionId
+                    }
+                    
                     // Add status message
                     var statusText = ""
                     
@@ -281,7 +290,7 @@ class GameViewModel: ObservableObject {
     
     private func startLoadingMessageRotation() {
         loadingMessageIndex = 0
-        loadingMessageTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+        loadingMessageTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             guard let self = self else { return }
             self.loadingMessageIndex = (self.loadingMessageIndex + 1) % self.loadingMessages.count
             self.currentLoadingMessage = self.loadingMessages[self.loadingMessageIndex]
