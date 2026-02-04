@@ -14,8 +14,9 @@ class RoomSelectionViewModel: ObservableObject {
     @Published var currentPage = 0
     let roomsPerPage = 6
     
-    // DEBUG MODE: Toggle to show all rooms unlocked for testing
-    @AppStorage("debugMode") var debugMode: Bool = false
+    // SECRET CODE: Unlock all rooms with secret code (works in production)
+    @AppStorage("allRoomsUnlocked") var allRoomsUnlocked: Bool = false
+    private let secretCode = "PDLINQ3KR7V7"  // Secret code to unlock all rooms (must be UPPERCASE)
     
     private let apiService = APIService.shared
     private var cancellables = Set<AnyCancellable>()
@@ -102,11 +103,26 @@ class RoomSelectionViewModel: ObservableObject {
     }
     
     func isUnlocked(_ roomId: String) -> Bool {
-        // DEBUG MODE: All rooms unlocked
-        if debugMode {
+        // SECRET CODE: All rooms unlocked (works in production)
+        if allRoomsUnlocked {
             return true
         }
         return unlockedRooms.contains(roomId)
+    }
+    
+    func verifySecretCode(_ code: String) -> Bool {
+        let enteredCode = code.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if enteredCode == secretCode {
+            allRoomsUnlocked = true
+            print("🔓 Secret code verified! All rooms unlocked.")
+            return true
+        }
+        return false
+    }
+    
+    func disableSecretCodeMode() {
+        allRoomsUnlocked = false
+        print("🔒 Secret code mode disabled.")
     }
     
     func isCompleted(_ roomId: String) -> Bool {
@@ -137,10 +153,6 @@ class RoomSelectionViewModel: ObservableObject {
         unlockedRooms = ["room_01"]
         currentPage = 0  // Reset to first page
         saveProgress()
-    }
-    
-    func toggleDebugMode() {
-        debugMode.toggle()
     }
     
     // Pagination methods

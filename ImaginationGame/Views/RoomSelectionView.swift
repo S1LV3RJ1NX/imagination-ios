@@ -86,22 +86,20 @@ struct RoomSelectionView: View {
                         }
                         .padding(.horizontal)
                         
-                        // Debug Mode Badge
-                        #if DEBUG
-                        if viewModel.debugMode {
+                        // Secret Code Badge (works in production)
+                        if viewModel.allRoomsUnlocked {
                             HStack {
-                                Image(systemName: "ladybug.fill")
-                                Text("DEBUG MODE: ALL ROOMS UNLOCKED")
+                                Image(systemName: "key.fill")
+                                Text("ALL ROOMS UNLOCKED")
                                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                             }
-                            .foregroundColor(Color.yellow)
+                            .foregroundColor(Color.cyan)
                             .padding(.vertical, 6)
                             .padding(.horizontal, 12)
-                            .background(Color.yellow.opacity(0.2))
+                            .background(Color.cyan.opacity(0.2))
                             .cornerRadius(8)
                             .padding(.top, 8)
                         }
-                        #endif
                         
                         // Room List (current page only)
                         ScrollView {
@@ -288,6 +286,9 @@ struct RoomCard: View {
 struct SettingsSheet: View {
     @ObservedObject var viewModel: RoomSelectionViewModel
     @Binding var isPresented: Bool
+    @State private var secretCodeInput: String = ""
+    @State private var showSecretCodeError: Bool = false
+    @State private var showSecretCodeSuccess: Bool = false
     
     var body: some View {
         ZStack {
@@ -308,75 +309,138 @@ struct SettingsSheet: View {
                 .padding(.top, 32)
                 .padding(.bottom, 24)
                 
-                VStack(spacing: 16) {
-                    // Debug Mode (only in DEBUG builds)
-                    #if DEBUG
-                    Button(action: {
-                        viewModel.toggleDebugMode()
-                        isPresented = false
-                    }) {
-                        HStack {
-                            Text(viewModel.debugMode ? "🐛 DISABLE DEBUG MODE" : "🐛 ENABLE DEBUG MODE")
+                ScrollView {
+                    VStack(spacing: 16) {
+                        // Secret Code Section (Works in production)
+                        VStack(spacing: 12) {
+                            Text("🔑 UNLOCK ALL ROOMS")
                                 .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color.black)
+                                .foregroundColor(Color.cyan)
                             
-                            Spacer()
+                            if viewModel.allRoomsUnlocked {
+                                // Already unlocked - show disable button
+                                VStack(spacing: 12) {
+                                    HStack {
+                                        Image(systemName: "checkmark.circle.fill")
+                                        Text("ALL ROOMS UNLOCKED")
+                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                    }
+                                    .foregroundColor(Color.green)
+                                    .padding(.vertical, 8)
+                                    
+                                    Button(action: {
+                                        viewModel.disableSecretCodeMode()
+                                        isPresented = false
+                                    }) {
+                                        Text("DISABLE & RESET")
+                                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color.white)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 10)
+                                            .background(Color.red.opacity(0.7))
+                                            .cornerRadius(8)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(8)
+                            } else {
+                                // Show input field
+                                VStack(spacing: 12) {
+                                    
+                                    HStack {
+                                        TextField("Enter secret code", text: $secretCodeInput)
+                                            .font(.system(size: 14, design: .monospaced))
+                                            .foregroundColor(Color.green)
+                                            .textFieldStyle(PlainTextFieldStyle())
+                                            .padding(12)
+                                            .background(Color.green.opacity(0.1))
+                                            .cornerRadius(8)
+                                            .autocapitalization(.allCharacters)
+                                            .disableAutocorrection(true)
+                                            .onChange(of: secretCodeInput) {
+                                                showSecretCodeError = false
+                                                showSecretCodeSuccess = false
+                                            }
+                                    }
+                                    
+                                    Button(action: {
+                                        if viewModel.verifySecretCode(secretCodeInput) {
+                                            showSecretCodeSuccess = true
+                                            showSecretCodeError = false
+                                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                                                isPresented = false
+                                            }
+                                        } else {
+                                            showSecretCodeError = true
+                                            showSecretCodeSuccess = false
+                                        }
+                                    }) {
+                                        Text("UNLOCK")
+                                            .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color.black)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(Color.cyan)
+                                            .cornerRadius(8)
+                                    }
+                                    
+                                    if showSecretCodeError {
+                                        Text("❌ Invalid code")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color.red)
+                                    }
+                                    
+                                    if showSecretCodeSuccess {
+                                        Text("✅ All rooms unlocked!")
+                                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                            .foregroundColor(Color.green)
+                                    }
+                                }
+                                .padding()
+                                .background(Color.cyan.opacity(0.05))
+                                .cornerRadius(8)
+                            }
+                        }
+                        .padding(.horizontal, 24)
+                        
+                        Divider()
+                            .background(Color.green.opacity(0.3))
+                            .padding(.vertical, 8)
+                        
+                        VStack(spacing: 16) {
+                            // Reset Progress
+                            Button(action: {
+                                viewModel.resetProgress()
+                                isPresented = false
+                            }) {
+                                HStack {
+                                    Image(systemName: "trash.fill")
+                                        .font(.system(size: 16))
+                                    
+                                    Text("RESET PROGRESS")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(Color.white)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.red.opacity(0.8))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.red, lineWidth: 2)
+                                )
+                            }
+                            .padding(.horizontal, 24)
                             
-                            Text("(Test All Rooms)")
+                            Text("⚠️  This will delete all your progress")
                                 .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Color.black.opacity(0.6))
-                        }
-                        .padding()
-                        .background(Color.yellow)
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.yellow.opacity(0.5), lineWidth: 1)
-                        )
-                    }
-                    .padding(.horizontal, 24)
-                    
-                    Text("⚠️  Debug mode unlocks all rooms for testing")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color.yellow.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                    
-                    Divider()
-                        .background(Color.green.opacity(0.3))
-                        .padding(.vertical, 8)
-                    #endif
-                    
-                    // Reset Progress
-                    Button(action: {
-                        viewModel.resetProgress()
-                        isPresented = false
-                    }) {
-                        HStack {
-                            Image(systemName: "trash.fill")
-                                .font(.system(size: 16))
-                            
-                            Text("RESET PROGRESS")
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        }
-                        .foregroundColor(Color.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.red.opacity(0.8))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.red, lineWidth: 2)
-                        )
-                    }
-                    .padding(.horizontal, 24)
-                    
-                    Text("⚠️  This will delete all your progress")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color.red.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 24)
-                }
+                                .foregroundColor(Color.red.opacity(0.7))
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
+                        } // End of inner VStack
+                    } // End of outer VStack
+                } // End of ScrollView
                 
                 Spacer()
                 
@@ -384,7 +448,7 @@ struct SettingsSheet: View {
                 Button(action: {
                     isPresented = false
                 }) {
-                    Text("CANCEL")
+                    Text("CLOSE")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundColor(Color.green)
                         .frame(maxWidth: .infinity)
