@@ -35,6 +35,7 @@ class SSEClient: NSObject {
         baseURL: String,
         sessionId: String,
         action: String,
+        roomId: String,
         onChunk: @escaping (String) -> Void,
         onComplete: @escaping ([String: Any]) -> Void,
         onError: @escaping (Error) -> Void
@@ -55,7 +56,8 @@ class SSEClient: NSObject {
         // Set body
         let body: [String: String] = [
             "session_id": sessionId,
-            "action": action
+            "action": action,
+            "room_id": roomId
         ]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         

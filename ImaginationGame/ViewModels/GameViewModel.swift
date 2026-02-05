@@ -116,6 +116,7 @@ class GameViewModel: ObservableObject {
         sseClient = apiService.processActionStream(
             sessionId: sessionId,
             action: action,
+            roomId: currentRoomId,
             onChunk: { [weak self] chunk in
                 guard let self = self else { return }
                 

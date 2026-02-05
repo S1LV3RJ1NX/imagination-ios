@@ -166,6 +166,7 @@ class APIService {
     func processActionStream(
         sessionId: String,
         action: String,
+        roomId: String,
         onChunk: @escaping (String) -> Void,
         onComplete: @escaping (ActionResponse) -> Void,
         onError: @escaping (Error) -> Void
@@ -176,6 +177,7 @@ class APIService {
             baseURL: self.baseURL,
             sessionId: sessionId,
             action: action,
+            roomId: roomId,
             onChunk: { chunk in
                 // Stream each narration chunk
                 onChunk(chunk)
