@@ -1,14 +1,17 @@
 import SwiftUI
 
 struct RoomSelectionView: View {
-    @StateObject private var viewModel = RoomSelectionViewModel()
+    @ObservedObject var viewModel: RoomSelectionViewModel
+    let onRoomSelected: (String) -> Void
+    let onBackToMenu: () -> Void
+    
     @State private var showDebugMenu = false
     
     var body: some View {
         NavigationView {
             ZStack {
                 // Hacker terminal theme
-                Color.black.ignoresSafeArea()
+                Color.black.ignoresSafeArea(edges: .all)
                 
                 if viewModel.isLoading {
                     ProgressView("LOADING MISSIONS...")
@@ -38,34 +41,34 @@ struct RoomSelectionView: View {
                     }
                     .padding()
                 } else {
-                    VStack(spacing: 16) {
+                    VStack(spacing: 12) {
                         // Header
-                        VStack(spacing: 8) {
-                            Text("SELECT MISSION")
-                                .font(.system(size: 24, weight: .bold, design: .monospaced))
+                        VStack(spacing: 4) {
+                            Text("SELECT CHAMBER")
+                                .font(.system(size: 20, weight: .bold, design: .monospaced))
                                 .foregroundColor(Color.green)
                             
-                            Text("Complete rooms to unlock new challenges")
-                                .font(.system(size: 12, design: .monospaced))
+                            Text("Complete chambers to unlock new challenges")
+                                .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(Color.green.opacity(0.6))
                         }
-                        .padding(.top, 16)
+                        .padding(.top, 4)
                         
                         // Progress Bar
-                        VStack(spacing: 8) {
+                        VStack(spacing: 6) {
                             HStack {
                                 Text("PROGRESS:")
-                                    .font(.system(size: 14, design: .monospaced))
+                                    .font(.system(size: 13, design: .monospaced))
                                     .foregroundColor(Color.green.opacity(0.8))
                                 
                                 Spacer()
                                 
                                 Text("\(viewModel.completedCount)/\(viewModel.totalRooms)")
-                                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                                     .foregroundColor(Color.green)
                                 
                                 Text("(\(viewModel.progressPercentage)%)")
-                                    .font(.system(size: 12, design: .monospaced))
+                                    .font(.system(size: 11, design: .monospaced))
                                     .foregroundColor(Color.green.opacity(0.6))
                             }
                             
@@ -74,23 +77,23 @@ struct RoomSelectionView: View {
                                 ZStack(alignment: .leading) {
                                     Rectangle()
                                         .fill(Color.green.opacity(0.2))
-                                        .frame(height: 8)
+                                        .frame(height: 6)
                                     
                                     Rectangle()
                                         .fill(Color.green)
-                                        .frame(width: geometry.size.width * CGFloat(viewModel.progressPercentage) / 100, height: 8)
+                                        .frame(width: geometry.size.width * CGFloat(viewModel.progressPercentage) / 100, height: 6)
                                 }
-                                .cornerRadius(4)
+                                .cornerRadius(3)
                             }
-                            .frame(height: 8)
+                            .frame(height: 6)
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, 12)
                         
                         // Secret Code Badge (works in production)
                         if viewModel.allRoomsUnlocked {
                             HStack {
                                 Image(systemName: "key.fill")
-                                Text("ALL ROOMS UNLOCKED")
+                                Text("ALL CHAMBERS UNLOCKED")
                                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                             }
                             .foregroundColor(Color.cyan)
@@ -103,39 +106,29 @@ struct RoomSelectionView: View {
                         
                         // Room List (current page only)
                         ScrollView {
-                            VStack(spacing: 16) {
+                            VStack(spacing: 14) {
                                 ForEach(viewModel.currentPageRooms) { room in
                                     RoomCard(
                                         room: room,
                                         isUnlocked: viewModel.isUnlocked(room.roomId),
                                         isCompleted: viewModel.isCompleted(room.roomId),
                                         onTap: {
+                                            // Don't allow replaying completed chambers
+                                            if viewModel.isCompleted(room.roomId) {
+                                                print("⚠️ Chamber \(room.roomId) already completed, cannot replay")
+                                                return
+                                            }
+                                            
                                             if viewModel.isUnlocked(room.roomId) {
-                                                viewModel.selectRoom(room.roomId)
+                                                onRoomSelected(room.roomId)
                                             }
                                         }
                                     )
                                 }
-                                
-                                // Show "Coming Soon" text only on last page
-                                if viewModel.currentPage == viewModel.totalPages - 1 {
-                                    VStack(spacing: 8) {
-                                        Text("✨ NEW ROOMS COMING SOON ✨")
-                                            .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                            .foregroundColor(Color.cyan)
-                                        
-                                        Text("More challenging puzzles are being crafted. Stay tuned!")
-                                            .font(.system(size: 11, design: .monospaced))
-                                            .foregroundColor(Color.cyan.opacity(0.7))
-                                            .multilineTextAlignment(.center)
-                                    }
-                                    .padding(.vertical, 20)
-                                    .frame(maxWidth: .infinity)
-                                }
                             }
-                            .padding(.horizontal)
-                            .padding(.top, 8)
-                            .padding(.bottom, 8)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 6)
+                            .padding(.bottom, 12)
                         }
                         
                         // Pagination Controls
@@ -185,31 +178,29 @@ struct RoomSelectionView: View {
                             }
                             .disabled(!viewModel.canGoToNextPage)
                         }
-                        .padding(.horizontal)
-                        .padding(.bottom, 16)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
                     }
+                    .padding(.top, 0)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(false)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: { showDebugMenu = true }) {
                         Image(systemName: "gearshape.fill")
                             .foregroundColor(Color.green)
+                            .font(.system(size: 18))
                     }
                 }
             }
-            .sheet(isPresented: $viewModel.showGame) {
-                if let roomId = viewModel.selectedRoomId {
-                    GameView(roomId: roomId, onRoomComplete: {
-                        viewModel.markRoomComplete(roomId)
-                    })
-                }
-            }
+            .toolbarBackground(.hidden, for: .navigationBar)
             .sheet(isPresented: $showDebugMenu) {
                 SettingsSheet(viewModel: viewModel, isPresented: $showDebugMenu)
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             viewModel.loadRooms()
         }
@@ -235,7 +226,7 @@ struct RoomCard: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(room.roomName)
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
-                        .foregroundColor(isUnlocked ? Color.green : Color.gray)
+                        .foregroundColor(textColor)
                 }
                 
                 Spacer()
@@ -245,17 +236,19 @@ struct RoomCard: View {
                         .foregroundColor(Color.gray)
                 }
             }
-            .padding(16)
+            .padding(.vertical, 18)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 70)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(isUnlocked ? Color.green.opacity(0.05) : Color.black)
+                    .fill(backgroundColor)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(isUnlocked ? Color.green : Color.gray.opacity(0.3), lineWidth: 2)
+                    .stroke(borderColor, lineWidth: borderWidth)
             )
         }
-        .disabled(!isUnlocked)
+        .disabled(!isUnlocked || isCompleted)  // Disable if locked OR completed
     }
     
     var statusIcon: String {
@@ -265,9 +258,33 @@ struct RoomCard: View {
     }
     
     var statusColor: Color {
-        if isCompleted { return Color.green }
-        if isUnlocked { return Color.yellow }
-        return Color.gray
+        if isCompleted { return Color.gray.opacity(0.6) }  // Muted for completed
+        if isUnlocked { return Color.cyan }  // Bright cyan for playable
+        return Color.gray.opacity(0.4)  // Very muted for locked
+    }
+    
+    var textColor: Color {
+        if isCompleted { return Color.gray }  // Gray text for completed
+        if isUnlocked { return Color.green }  // Green for current/playable
+        return Color.gray.opacity(0.5)  // Muted for locked
+    }
+    
+    var backgroundColor: Color {
+        if isCompleted { return Color.gray.opacity(0.05) }  // Subtle gray for completed
+        if isUnlocked { return Color.green.opacity(0.08) }  // Bright green tint for playable
+        return Color.black  // Black for locked
+    }
+    
+    var borderColor: Color {
+        if isCompleted { return Color.gray.opacity(0.3) }  // Gray border for completed
+        if isUnlocked { return Color.green }  // GREEN BORDER only for current/playable
+        return Color.gray.opacity(0.2)  // Subtle gray for locked
+    }
+    
+    var borderWidth: CGFloat {
+        if isCompleted { return 1 }  // Thin border for completed
+        if isUnlocked { return 2.5 }  // Thick GREEN border for playable (stands out!)
+        return 1  // Thin for locked
     }
     
     var difficultyColor: Color {
@@ -285,6 +302,7 @@ struct RoomCard: View {
 // MARK: - Settings Sheet
 struct SettingsSheet: View {
     @ObservedObject var viewModel: RoomSelectionViewModel
+    @EnvironmentObject var gameViewModel: GameViewModel
     @Binding var isPresented: Bool
     @State private var secretCodeInput: String = ""
     @State private var showSecretCodeError: Bool = false
@@ -412,6 +430,7 @@ struct SettingsSheet: View {
                             // Reset Progress
                             Button(action: {
                                 viewModel.resetProgress()
+                                gameViewModel.clearGameState()
                                 isPresented = false
                             }) {
                                 HStack {
@@ -469,7 +488,16 @@ struct SettingsSheet: View {
 // MARK: - Preview
 struct RoomSelectionView_Previews: PreviewProvider {
     static var previews: some View {
-        RoomSelectionView()
-            .preferredColorScheme(.dark)
+        RoomSelectionView(
+            viewModel: RoomSelectionViewModel(),
+            onRoomSelected: { roomId in
+                print("Selected room: \(roomId)")
+            },
+            onBackToMenu: {
+                print("Back to menu")
+            }
+        )
+        .environmentObject(GameViewModel())
+        .preferredColorScheme(.dark)
     }
 }

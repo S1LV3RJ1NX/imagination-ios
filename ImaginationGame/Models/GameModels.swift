@@ -24,6 +24,12 @@ struct GameState: Codable, Identifiable {
     let createdAt: Date
     let lastActionAt: Date
     
+    // NEW: Trait tracking and journey stats
+    var traits: PlayerTraits
+    var journeyStats: JourneyStats
+    var keyDecisions: [KeyDecision]
+    var journalUnlocked: [String]
+    
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case roomId = "room_id"
@@ -32,6 +38,10 @@ struct GameState: Codable, Identifiable {
         case hintsViewed = "hints_viewed"
         case createdAt = "created_at"
         case lastActionAt = "last_action_at"
+        case traits
+        case journeyStats = "journey_stats"
+        case keyDecisions = "key_decisions"
+        case journalUnlocked = "journal_unlocked"
     }
 }
 
@@ -88,23 +98,37 @@ struct HistoryEntry: Codable {
 
 struct StartGameRequest: Codable {
     let roomId: String?
+    let recoveryData: RecoveryData?
     
     enum CodingKeys: String, CodingKey {
         case roomId = "room_id"
+        case recoveryData = "recovery_data"
     }
     
-    init(roomId: String? = nil) {
+    init(roomId: String? = nil, recoveryData: RecoveryData? = nil) {
         self.roomId = roomId
+        self.recoveryData = recoveryData
     }
 }
 
 struct ActionRequest: Codable {
     let sessionId: String
     let action: String
+    let roomId: String?
+    let recoveryData: RecoveryData?
     
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case action
+        case roomId = "room_id"
+        case recoveryData = "recovery_data"
+    }
+    
+    init(sessionId: String, action: String, roomId: String? = nil, recoveryData: RecoveryData? = nil) {
+        self.sessionId = sessionId
+        self.action = action
+        self.roomId = roomId
+        self.recoveryData = recoveryData
     }
 }
 
@@ -114,11 +138,15 @@ struct StartGameResponse: Codable {
     let sessionId: String
     let openingNarration: String
     let state: GameState
+    let journalChapterUnlocked: String?
+    let asciiArt: String?
     
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case openingNarration = "opening_narration"
         case state
+        case journalChapterUnlocked = "journal_chapter_unlocked"
+        case asciiArt = "ascii_art"
     }
 }
 
@@ -136,6 +164,11 @@ struct ActionResponse: Codable {
     let hintsAvailable: [Int]
     // Note: Removed guardTrust/guardAlert - flags are room-specific and server-side only
     
+    // NEW: Trait tracking and journey stats (included on chamber completion)
+    let traits: PlayerTraits?
+    let journeyStats: JourneyStats?
+    let journalChapterUnlocked: String?
+    
     enum CodingKeys: String, CodingKey {
         case type
         case sessionId = "session_id"
@@ -145,6 +178,9 @@ struct ActionResponse: Codable {
         case narration
         case hintsUnlocked = "hints_unlocked"
         case hintsAvailable = "hints_available"
+        case traits
+        case journeyStats = "journey_stats"
+        case journalChapterUnlocked = "journal_chapter_unlocked"
     }
 }
 

@@ -9,7 +9,7 @@
 import Foundation
 import Combine
 
-class APIService {
+final class APIService: @unchecked Sendable {
     
     // MARK: - Configuration
     
@@ -88,12 +88,15 @@ class APIService {
     
     // MARK: - Game Start
     
-    func startGame(roomId: String? = nil) -> AnyPublisher<StartGameResponse, Error> {
+    func startGame(roomId: String? = nil, recoveryData: RecoveryData? = nil) -> AnyPublisher<StartGameResponse, Error> {
         let url = URL(string: "\(baseURL)/game/start")!
         #if DEBUG
         print("🎮 Starting game at: \(url.absoluteString)")
         if let roomId = roomId {
             print("🚪 Selected room: \(roomId)")
+        }
+        if recoveryData != nil {
+            print("🔄 Sending recovery data (iOS-as-source-of-truth)")
         }
         #endif
         
@@ -101,7 +104,7 @@ class APIService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body = StartGameRequest(roomId: roomId)
+        let body = StartGameRequest(roomId: roomId, recoveryData: recoveryData)
         request.httpBody = try? JSONEncoder().encode(body)
         
         return session.dataTaskPublisher(for: request)
@@ -221,12 +224,124 @@ class APIService {
             .eraseToAnyPublisher()
     }
     
+    // MARK: - Journal API
+    
+    func getJournalChapters(sessionId: String?) -> AnyPublisher<JournalListResponse, Error> {
+        let urlString: String
+        if let sessionId = sessionId {
+            urlString = "\(baseURL)/game/journal?session_id=\(sessionId)"
+        } else {
+            urlString = "\(baseURL)/game/journal"
+        }
+        let url = URL(string: urlString)!
+        #if DEBUG
+        print("📖 Fetching journal chapters from: \(url.absoluteString)")
+        #endif
+        
+        return session.dataTaskPublisher(for: url)
+            .tryMap { data, response -> Data in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw APIError.invalidResponse
+                }
+                
+                // Handle 404 as session expired
+                if httpResponse.statusCode == 404 {
+                    throw APIError.sessionExpired
+                }
+                
+                guard (200...299).contains(httpResponse.statusCode) else {
+                    throw APIError.invalidResponse
+                }
+                
+                return data
+            }
+            .decode(type: JournalListResponse.self, decoder: decoder)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func getChapter(sessionId: String, chapterId: String) -> AnyPublisher<ChapterResponse, Error> {
+        let url = URL(string: "\(baseURL)/game/journal/\(chapterId)?session_id=\(sessionId)")!
+        #if DEBUG
+        print("📄 Fetching chapter \(chapterId) from: \(url.absoluteString)")
+        #endif
+        
+        return session.dataTaskPublisher(for: url)
+            .tryMap { data, response -> Data in
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw APIError.invalidResponse
+                }
+                
+                // Handle 404 as session expired
+                if httpResponse.statusCode == 404 {
+                    throw APIError.sessionExpired
+                }
+                
+                guard (200...299).contains(httpResponse.statusCode) else {
+                    throw APIError.invalidResponse
+                }
+                
+                return data
+            }
+            .decode(type: ChapterResponse.self, decoder: decoder)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    // MARK: - Wizard API
+    
+    func getWizardReveal(sessionId: String) -> AnyPublisher<WizardRevealResponse, Error> {
+        let url = URL(string: "\(baseURL)/game/wizard/reveal?session_id=\(sessionId)")!
+        #if DEBUG
+        print("🧙 Fetching wizard reveal from: \(url.absoluteString)")
+        #endif
+        
+        return session.dataTaskPublisher(for: url)
+            .tryMap { data, response -> Data in
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw APIError.invalidResponse
+                }
+                return data
+            }
+            .decode(type: WizardRevealResponse.self, decoder: decoder)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
+    func shareProfile(sessionId: String) -> AnyPublisher<ShareProfileResponse, Error> {
+        let url = URL(string: "\(baseURL)/game/profile/share")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body = ShareProfileRequest(sessionId: sessionId)
+        request.httpBody = try? JSONEncoder().encode(body)
+        
+        #if DEBUG
+        print("🖼️ Requesting profile share image")
+        #endif
+        
+        return session.dataTaskPublisher(for: request)
+            .tryMap { data, response -> Data in
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw APIError.invalidResponse
+                }
+                return data
+            }
+            .decode(type: ShareProfileResponse.self, decoder: decoder)
+            .receive(on: DispatchQueue.main)
+            .eraseToAnyPublisher()
+    }
+    
     // MARK: - Errors
     
     enum APIError: LocalizedError {
         case invalidResponse
         case networkError
         case decodingError
+        case sessionExpired
         
         var errorDescription: String? {
             switch self {
@@ -236,6 +351,8 @@ class APIService {
                 return "Network connection failed"
             case .decodingError:
                 return "Failed to decode response"
+            case .sessionExpired:
+                return "Your session has expired. Please start a new journey."
             }
         }
     }

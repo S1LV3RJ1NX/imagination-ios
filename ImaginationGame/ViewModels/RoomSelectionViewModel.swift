@@ -12,13 +12,14 @@ class RoomSelectionViewModel: ObservableObject {
     
     // Pagination
     @Published var currentPage = 0
-    let roomsPerPage = 6
+    let roomsPerPage = 5
     
     // SECRET CODE: Unlock all rooms with secret code (works in production)
     @AppStorage("allRoomsUnlocked") var allRoomsUnlocked: Bool = false
     private let secretCode = "PDLINQ3KR7V7"  // Secret code to unlock all rooms (must be UPPERCASE)
     
     private let apiService = APIService.shared
+    private let roomsCache = RoomsCache.shared
     private var cancellables = Set<AnyCancellable>()
     
     var totalRooms: Int { rooms.count }
@@ -59,9 +60,22 @@ class RoomSelectionViewModel: ObservableObject {
     
     init() {
         loadProgress()
+        loadRoomsFromCache()
+    }
+    
+    /// Load rooms from cache (instant, offline)
+    func loadRoomsFromCache() {
+        if let cached = roomsCache.loadRooms(), !cached.isEmpty {
+            rooms = cached
+            print("📦 Loaded \(cached.count) rooms from cache")
+        }
     }
     
     func loadRooms() {
+        // Always load from cache first (instant)
+        loadRoomsFromCache()
+        
+        // Then try to fetch from backend to sync latest data
         isLoading = true
         errorMessage = nil
         
@@ -69,16 +83,29 @@ class RoomSelectionViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink(
                 receiveCompletion: { [weak self] (completion: Subscribers.Completion<Error>) in
-                    self?.isLoading = false
+                    guard let self = self else { return }
+                    self.isLoading = false
+                    
                     if case .failure(let error) = completion {
-                        self?.errorMessage = "Failed to load rooms: \(error.localizedDescription)"
-                        print("❌ Failed to load rooms: \(error)")
+                        // If we have cache, don't show error
+                        if self.rooms.isEmpty {
+                            self.errorMessage = "Failed to load rooms: \(error.localizedDescription)"
+                            print("❌ Failed to load rooms: \(error)")
+                        } else {
+                            // Silently fail - we have cached data
+                            print("⚠️ Backend sync failed, using cache: \(error.localizedDescription)")
+                        }
                     }
                 },
                 receiveValue: { [weak self] (response: RoomsResponse) in
-                    self?.rooms = response.rooms
-                    self?.loadProgress()
-                    print("✅ Loaded \(response.rooms.count) rooms")
+                    guard let self = self else { return }
+                    
+                    // Save to cache
+                    self.roomsCache.saveRooms(response.rooms)
+                    
+                    self.rooms = response.rooms
+                    self.loadProgress()
+                    print("✅ Loaded \(response.rooms.count) rooms from backend")
                 }
             )
             .store(in: &cancellables)
@@ -126,7 +153,8 @@ class RoomSelectionViewModel: ObservableObject {
     }
     
     func isCompleted(_ roomId: String) -> Bool {
-        completedRooms.contains(roomId)
+        // Check both old tracking and new attempt tracker
+        return completedRooms.contains(roomId) || ChamberAttemptTracker.shared.isCompleted(chamberId: roomId)
     }
     
     func selectRoom(_ roomId: String) {
@@ -149,10 +177,42 @@ class RoomSelectionViewModel: ObservableObject {
     }
     
     func resetProgress() {
+        print("🗑️ RESET PROGRESS: Starting comprehensive cleanup...")
+        
+        // Clear room selection state
         completedRooms.removeAll()
         unlockedRooms = ["room_01"]
-        currentPage = 0  // Reset to first page
+        currentPage = 0
         saveProgress()
+        
+        // Clear ALL local storage caches
+        ChamberAttemptTracker.shared.clearAll()
+        JournalCache.shared.clearCache()
+        RoomsCache.shared.clearCache()
+        
+        // Clear ALL UserDefaults keys related to game state
+        let keysToRemove = [
+            "lastSessionId",
+            "lastRoomId",
+            "playerTraits",
+            "journeyStats",
+            "keyDecisions",
+            "journalUnlocked",
+            "hintsUsedThisChamber",
+            "attemptsThisChamber",
+            "actionsThisChamber",
+            "completedRooms",
+            "unlockedRooms",
+            "allRoomsUnlocked",
+            "currentPage"
+        ]
+        
+        for key in keysToRemove {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+        
+        print("✅ Reset complete - all local data cleared")
+        print("ℹ️  Backend sessions will auto-expire (TTL)")
     }
     
     // Pagination methods

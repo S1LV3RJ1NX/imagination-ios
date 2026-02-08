@@ -11,16 +11,19 @@ import SwiftUI
 struct GameView: View {
     let roomId: String
     let onRoomComplete: () -> Void
+    let onBack: (() -> Void)?
+    let onJournalNotificationTapped: (() -> Void)?
     
-    @StateObject private var viewModel = GameViewModel()
+    @EnvironmentObject private var viewModel: GameViewModel
     @State private var actionText: String = ""
     @FocusState private var isInputFocused: Bool
-    @Environment(\.dismiss) private var dismiss
     @State private var showHints: Bool = false
     
-    init(roomId: String, onRoomComplete: @escaping () -> Void) {
+    init(roomId: String, onRoomComplete: @escaping () -> Void, onBack: (() -> Void)? = nil, onJournalNotificationTapped: (() -> Void)? = nil) {
         self.roomId = roomId
         self.onRoomComplete = onRoomComplete
+        self.onBack = onBack
+        self.onJournalNotificationTapped = onJournalNotificationTapped
     }
     
     var body: some View {
@@ -40,20 +43,60 @@ struct GameView: View {
                     inputAreaView
                 }
             }
+            
+            // Journal unlock notification
+            if let chapter = viewModel.lastUnlockedChapter {
+                JournalUnlockNotification(
+                    chapterName: formatChapterName(chapter),
+                    isShowing: $viewModel.showJournalUnlockNotification,
+                    onTap: {
+                        onJournalNotificationTapped?()
+                    }
+                )
+                .zIndex(100)
+            }
         }
         .onAppear {
             // Start game with specified room
+            print("🎮 GameView appeared for roomId: \(roomId)")
+            print("🎮 Current sessionId: \(viewModel.sessionId ?? "nil")")
             viewModel.startNewGame(roomId: roomId)
         }
         .onChange(of: viewModel.gamePhase) { oldValue, newValue in
+            #if DEBUG
+            print("🎮 GamePhase changed: \(oldValue.displayText) -> \(newValue.displayText)")
+            #endif
+            
             if newValue == .won {
-                // Mark room as complete
+                #if DEBUG
+                print("🏆 Chamber WON! Marking complete and unlocking next for \(roomId)")
+                #endif
+                
+                // Mark chamber as completed (lock from replay) and unlock next
+                ChamberAttemptTracker.shared.markComplete(chamberId: roomId)
                 onRoomComplete()
                 
-                // Auto-dismiss after 3 seconds
+                #if DEBUG
+                print("⏱️ Returning to chambers list in 3 seconds...")
+                #endif
+                
+                // Auto-return to chambers list after 3 seconds
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                    dismiss()
+                    #if DEBUG
+                    print("⬅️ Returning to chambers list (chamber complete)")
+                    #endif
+                    onBack?()
                 }
+            } else if newValue == .lost {
+                #if DEBUG
+                print("💀 Chamber FAILED for \(roomId) - can retry")
+                #endif
+                
+                // DON'T mark as complete - allow retry
+                // DON'T call onRoomComplete() - don't unlock next
+                // Traits and attempts are already tracked in iOS state
+                
+                // No auto-return for failed - let user retry or go back manually
             }
         }
         .sheet(isPresented: $showHints) {
@@ -69,10 +112,12 @@ struct GameView: View {
         VStack(spacing: 8) {
             // Back button
             HStack {
-                Button(action: { dismiss() }) {
+                Button(action: { 
+                    onBack?()
+                }) {
                     HStack(spacing: 4) {
                         Image(systemName: "chevron.left")
-                        Text("ROOMS")
+                        Text("CHAMBERS")
                     }
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundColor(.terminalGreen.opacity(0.7))
@@ -88,13 +133,13 @@ struct GameView: View {
             
             HStack(spacing: 20) {
                 StatusBadge(
-                    label: "TURN",
-                    value: "\(viewModel.turnCount)",
+                    label: "",
+                    value: "Turn \(viewModel.turnCount)",
                     color: .terminalGreen
                 )
                 
                 StatusBadge(
-                    label: "STATUS",
+                    label: "",
                     value: viewModel.gamePhase.displayText,
                     color: viewModel.gamePhase.color
                 )
@@ -138,9 +183,17 @@ struct GameView: View {
     private var gameAreaView: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: true) {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .center, spacing: 16) {
+                    // ASCII Art Display (if available) - shown as first message
+                    if let asciiArt = viewModel.currentAsciiArt {
+                        AsciiArtView(asciiArt: asciiArt)
+                            .padding(.top, 8)
+                            .padding(.bottom, 4)
+                    }
+                    
                     ForEach(viewModel.messages) { message in
                         MessageView(message: message)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .id(message.id)
                     }
                     
@@ -212,29 +265,69 @@ struct GameView: View {
     
     private var inputAreaView: some View {
         VStack(spacing: 12) {
-            // New game button (only show if game is over)
-            if viewModel.isGameOver {
-                Button(action: {
-                    actionText = ""
-                    viewModel.startNewGame()
-                }) {
+            // Success message (auto-advancing)
+            if viewModel.gamePhase == .won {
+                VStack(spacing: 10) {
                     HStack {
-                        Image(systemName: "arrow.clockwise")
-                        Text("NEW GAME")
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("CHAMBER COMPLETE!")
                     }
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundColor(.terminalBlack)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(
-                        LinearGradient(
-                            colors: [.terminalGreen, .cyan],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .cornerRadius(8)
+                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan)
+                    
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .cyan))
+                        .scaleEffect(0.8)
                 }
+                .padding()
+                .background(Color.cyan.opacity(0.1))
+                .cornerRadius(8)
+                .padding(.horizontal)
+            }
+            
+            // Failure message with retry button
+            if viewModel.gamePhase == .lost {
+                VStack(spacing: 12) {
+                    VStack(spacing: 8) {
+                        HStack {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("CHAMBER FAILED")
+                        }
+                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .foregroundColor(.red)
+                        
+                        Text("Your choices revealed much about you.")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    // Retry button
+                    Button(action: {
+                        actionText = ""
+                        viewModel.startNewGame(roomId: roomId)
+                    }) {
+                        HStack {
+                            Image(systemName: "arrow.clockwise")
+                            Text("RETRY CHAMBER")
+                        }
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundColor(.black)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(
+                            LinearGradient(
+                                colors: [.orange, .red],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .cornerRadius(8)
+                    }
+                }
+                .padding()
+                .background(Color.red.opacity(0.05))
+                .cornerRadius(8)
                 .padding(.horizontal)
             }
             
@@ -251,7 +344,7 @@ struct GameView: View {
                     
                     TextEditor(text: $actionText)
                         .font(.system(size: 16, design: .monospaced))
-                        .foregroundColor(.terminalGreen)
+                        .foregroundColor(.cyan)  // Blue text for user input!
                         .scrollContentBackground(.hidden)
                         .background(Color.terminalBlack)
                         .frame(height: 44)
@@ -287,6 +380,61 @@ struct GameView: View {
         viewModel.sendAction(action)
         actionText = ""
     }
+    
+    // MARK: - Helpers
+    
+    private func formatChapterName(_ chapterId: String) -> String {
+        if chapterId == "prologue" {
+            return "Prologue"
+        } else if chapterId == "epilogue" {
+            return "Epilogue"
+        } else {
+            // Extract number from "chapter_01", "chapter_02", etc.
+            let numberString = chapterId.replacingOccurrences(of: "chapter_", with: "")
+            if let number = Int(numberString) {
+                return "Chapter \(number)"
+            }
+            return chapterId.capitalized
+        }
+    }
+}
+
+// MARK: - ASCII Art View
+
+struct AsciiArtView: View {
+    let asciiArt: String
+    @State private var opacity = 0.0
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(asciiArt)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.cyan.opacity(0.9))
+                .multilineTextAlignment(.center)
+                .lineSpacing(1)
+                .padding(.vertical, 12)
+                .padding(.horizontal, 16)
+        }
+        .frame(maxWidth: .infinity)
+        .background(Color.black.opacity(0.3))
+        .overlay(
+            VStack {
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.5))
+                    .frame(height: 1)
+                Spacer()
+                Rectangle()
+                    .fill(Color.cyan.opacity(0.5))
+                    .frame(height: 1)
+            }
+        )
+        .opacity(opacity)
+        .onAppear {
+            withAnimation(.easeIn(duration: 0.8)) {
+                opacity = 1.0
+            }
+        }
+    }
 }
 
 // MARK: - Message View
@@ -299,6 +447,7 @@ struct MessageView: View {
             .font(.system(size: message.fontSize, design: .monospaced))
             .foregroundColor(message.color)
             .multilineTextAlignment(.leading)
+            .lineSpacing(6)
             .fixedSize(horizontal: false, vertical: true)
             .padding(message.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,9 +499,9 @@ extension NarrationMessage {
     var fontSize: CGFloat {
         switch type {
         case .narration:
-            return 16
-        case .playerAction:
             return 15
+        case .playerAction:
+            return 14
         case .systemMessage:
             return 13
         case .complete:
@@ -362,10 +511,12 @@ extension NarrationMessage {
     
     var padding: CGFloat {
         switch type {
+        case .narration:
+            return 12
+        case .playerAction:
+            return 10
         case .complete, .systemMessage:
             return 8
-        default:
-            return 0
         }
     }
     

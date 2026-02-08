@@ -28,9 +28,29 @@ class GameViewModel: ObservableObject {
     @Published var streamingNarration: String = ""
     @Published var currentLoadingMessage: String = "Thinking..."
     
+    // NEW: Trait tracking and journey progress
+    @Published var currentTraits: PlayerTraits = PlayerTraits()
+    @Published var journeyStats: JourneyStats = JourneyStats()
+    @Published var keyDecisions: [KeyDecision] = []
+    @Published var journalUnlocked: [String] = []
+    @Published var lastUnlockedChapter: String?
+    
+    // Current chamber tracking (for recovery)
+    @Published var hintsUsedThisChamber: Int = 0
+    @Published var attemptsThisChamber: Int = 0
+    @Published var actionsThisChamber: Int = 0
+    
+    // Chamber visual
+    @Published var currentAsciiArt: String?
+    
+    // Notification
+    @Published var showJournalUnlockNotification: Bool = false
+    
     // MARK: - Private Properties
     
     private let apiService = APIService.shared
+    private let journalCache = JournalCache.shared
+    private let attemptTracker = ChamberAttemptTracker.shared
     private var cancellables = Set<AnyCancellable>()
     private var sseClient: SSEClient?
     private var loadingMessageTimer: Timer?
@@ -61,7 +81,44 @@ class GameViewModel: ObservableObject {
         messages.removeAll()
         currentRoomId = roomId
         
-        apiService.startGame(roomId: roomId)
+        // DON'T reset journey tracking - iOS is source of truth!
+        // Progress is preserved across chambers and backend restarts
+        
+        // Check if this is a retry attempt (has previous attempt data)
+        if let previousAttempt = attemptTracker.getAttempt(chamberId: roomId) {
+            #if DEBUG
+            print("🔄 Retry attempt #\(previousAttempt.attemptCount + 1) for \(roomId)")
+            print("   Previous: \(previousAttempt.hintsUsedTotal) hints, \(previousAttempt.wrongAttemptsTotal) wrong attempts")
+            #endif
+            
+            // Keep cumulative tracking from previous attempts
+            hintsUsedThisChamber = previousAttempt.hintsUsedTotal
+            attemptsThisChamber = previousAttempt.wrongAttemptsTotal
+            actionsThisChamber = previousAttempt.actionsTotal
+        } else {
+            // First attempt at this chamber
+            hintsUsedThisChamber = 0
+            attemptsThisChamber = 0
+            actionsThisChamber = 0
+        }
+        
+        // Build recovery data from stored state
+        // Only send if there's actual progress (not first time)
+        let hasProgress = !journalUnlocked.isEmpty || journeyStats.chambersCompleted > 0
+        let recovery = hasProgress ? buildRecoveryData() : nil
+        
+        #if DEBUG
+        if hasProgress {
+            print("🔄 Starting chamber with recovery data:")
+            print("  - Chambers completed: \(journeyStats.chambersCompleted)")
+            print("  - Journal unlocked: \(journalUnlocked.count)")
+            print("  - Traits: logical=\(currentTraits.logicalThinking), creative=\(currentTraits.creativeThinking)")
+        } else {
+            print("🆕 Starting first chamber (no recovery data)")
+        }
+        #endif
+        
+        apiService.startGame(roomId: roomId, recoveryData: recovery)
             .sink(
                 receiveCompletion: { [weak self] completion in
                     self?.isLoading = false
@@ -78,8 +135,29 @@ class GameViewModel: ObservableObject {
                     self?.hintsUnlocked = response.state.hintsUnlocked.count
                     // Flags are room-specific and not displayed in UI
                     
+                    // Load traits and stats from backend response
+                    self?.currentTraits = response.state.traits
+                    self?.journeyStats = response.state.journeyStats
+                    self?.keyDecisions = response.state.keyDecisions
+                    self?.journalUnlocked = response.state.journalUnlocked
+                    
+                    // Check for journal unlock
+                    if let chapter = response.journalChapterUnlocked {
+                        self?.lastUnlockedChapter = chapter
+                        self?.showJournalUnlockNotification = true
+                        
+                        // Cache the unlock status immediately
+                        self?.journalCache.unlockChapter(chapterId: chapter)
+                    }
+                    
+                    // Load ASCII art
+                    self?.currentAsciiArt = response.asciiArt
+                    
                     // Add opening narration (no system message)
                     self?.addNarration(response.openingNarration)
+                    
+                    // Persist state
+                    self?.saveGameState()
                     
                     self?.isLoading = false
                 }
@@ -184,6 +262,12 @@ class GameViewModel: ObservableObject {
                     self.hintsUnlocked = Int(response.hintsUnlocked)
                     self.gamePhase = GamePhase(rawValue: response.phase) ?? .playing
                     
+                    // Track chamber actions
+                    self.actionsThisChamber += 1
+                    if response.outcome.lowercased().contains("incorrect") || response.outcome.lowercased().contains("wrong") {
+                        self.attemptsThisChamber += 1
+                    }
+                    
                     // IMPORTANT: Update session_id in case backend auto-recovered from a lost session
                     // This handles backend restarts gracefully
                     if self.sessionId != response.sessionId {
@@ -193,21 +277,71 @@ class GameViewModel: ObservableObject {
                         self.sessionId = response.sessionId
                     }
                     
+                    // Update traits and stats on chamber completion
+                    if let traits = response.traits {
+                        self.currentTraits = traits
+                        #if DEBUG
+                        print("✨ Traits updated after chamber completion")
+                        #endif
+                    }
+                    
+                    if let stats = response.journeyStats {
+                        self.journeyStats = stats
+                        #if DEBUG
+                        print("📊 Journey stats updated: \(stats.chambersCompleted) chambers completed")
+                        #endif
+                    }
+                    
+                    // Check for new journal chapter
+                    if let chapter = response.journalChapterUnlocked {
+                        if !self.journalUnlocked.contains(chapter) {
+                            self.journalUnlocked.append(chapter)
+                            self.lastUnlockedChapter = chapter
+                            self.showJournalUnlockNotification = true
+                            
+                            // Cache the unlock status immediately
+                            self.journalCache.unlockChapter(chapterId: chapter)
+                        }
+                    }
+                    
+                    // Save updated state
+                    self.saveGameState()
+                    
                     // Add status message
                     var statusText = ""
                     
                     if response.phase == "success" {
-                        statusText = "🎉 YOU WON! The door opens..."
+                        statusText = "🎉 CHAMBER COMPLETE! The door opens..."
+                        
+                        // Update final attempt stats
+                        self.attemptTracker.updateAttempt(
+                            chamberId: self.currentRoomId,
+                            hintsUsed: self.hintsUsedThisChamber,
+                            actions: self.actionsThisChamber,
+                            wrongAttempts: self.attemptsThisChamber
+                        )
+                        
+                        // Mark as completed (lock from replay)
+                        self.attemptTracker.markComplete(chamberId: self.currentRoomId)
+                        
+                        // Reset chamber tracking on success
+                        self.hintsUsedThisChamber = 0
+                        self.attemptsThisChamber = 0
+                        self.actionsThisChamber = 0
                     } else if response.phase == "failure" {
-                        statusText = "💀 GAME OVER"
+                        statusText = "💀 CHAMBER FAILED - Your choices revealed much about you."
+                        
+                        // Update attempt stats (will be used on retry)
+                        self.attemptTracker.updateAttempt(
+                            chamberId: self.currentRoomId,
+                            hintsUsed: self.hintsUsedThisChamber,
+                            actions: self.actionsThisChamber,
+                            wrongAttempts: self.attemptsThisChamber
+                        )
                     }
                     
                     if !statusText.isEmpty {
                         self.addCompleteMessage(statusText)
-                    }
-                    
-                    if response.phase == "success" || response.phase == "failure" {
-                        self.addSystemMessage("\n🎮 Game Over! Tap 'New Game' to play again.")
                     }
                     
                     self.isProcessingAction = false
@@ -333,5 +467,215 @@ class GameViewModel: ObservableObject {
     
     var canSendAction: Bool {
         sessionId != nil && !isProcessingAction && !isGameOver
+    }
+    
+    // MARK: - Persistence
+    
+    private func saveGameState() {
+        guard let sessionId = sessionId else { return }
+        
+        let encoder = JSONEncoder()
+        
+        // Save session ID
+        UserDefaults.standard.set(sessionId, forKey: "lastSessionId")
+        UserDefaults.standard.set(currentRoomId, forKey: "lastRoomId")
+        
+        // Save traits
+        if let traitsData = try? encoder.encode(currentTraits) {
+            UserDefaults.standard.set(traitsData, forKey: "playerTraits")
+        }
+        
+        // Save journey stats
+        if let statsData = try? encoder.encode(journeyStats) {
+            UserDefaults.standard.set(statsData, forKey: "journeyStats")
+        }
+        
+        // Save key decisions
+        if let decisionsData = try? encoder.encode(keyDecisions) {
+            UserDefaults.standard.set(decisionsData, forKey: "keyDecisions")
+        }
+        
+        // Save journal unlocked
+        if let journalData = try? encoder.encode(journalUnlocked) {
+            UserDefaults.standard.set(journalData, forKey: "journalUnlocked")
+        }
+        
+        // Save chamber tracking
+        UserDefaults.standard.set(hintsUsedThisChamber, forKey: "hintsUsedThisChamber")
+        UserDefaults.standard.set(attemptsThisChamber, forKey: "attemptsThisChamber")
+        UserDefaults.standard.set(actionsThisChamber, forKey: "actionsThisChamber")
+        
+        #if DEBUG
+        print("💾 Game state persisted")
+        #endif
+    }
+    
+    func loadGameState() {
+        let decoder = JSONDecoder()
+        
+        // Load session ID
+        sessionId = UserDefaults.standard.string(forKey: "lastSessionId")
+        currentRoomId = UserDefaults.standard.string(forKey: "lastRoomId") ?? "room_01"
+        
+        // Load traits
+        if let traitsData = UserDefaults.standard.data(forKey: "playerTraits"),
+           let traits = try? decoder.decode(PlayerTraits.self, from: traitsData) {
+            currentTraits = traits
+        }
+        
+        // Load journey stats
+        if let statsData = UserDefaults.standard.data(forKey: "journeyStats"),
+           let stats = try? decoder.decode(JourneyStats.self, from: statsData) {
+            journeyStats = stats
+        }
+        
+        // Load key decisions
+        if let decisionsData = UserDefaults.standard.data(forKey: "keyDecisions"),
+           let decisions = try? decoder.decode([KeyDecision].self, from: decisionsData) {
+            keyDecisions = decisions
+        }
+        
+        // Load journal unlocked
+        if let journalData = UserDefaults.standard.data(forKey: "journalUnlocked"),
+           let journal = try? decoder.decode([String].self, from: journalData) {
+            journalUnlocked = journal
+        }
+        
+        // Load chamber tracking
+        hintsUsedThisChamber = UserDefaults.standard.integer(forKey: "hintsUsedThisChamber")
+        attemptsThisChamber = UserDefaults.standard.integer(forKey: "attemptsThisChamber")
+        actionsThisChamber = UserDefaults.standard.integer(forKey: "actionsThisChamber")
+        
+        #if DEBUG
+        print("📥 Game state loaded from persistence")
+        #endif
+    }
+    
+    func clearGameState() {
+        // Clear UserDefaults
+        UserDefaults.standard.removeObject(forKey: "lastSessionId")
+        UserDefaults.standard.removeObject(forKey: "lastRoomId")
+        UserDefaults.standard.removeObject(forKey: "playerTraits")
+        UserDefaults.standard.removeObject(forKey: "journeyStats")
+        UserDefaults.standard.removeObject(forKey: "keyDecisions")
+        UserDefaults.standard.removeObject(forKey: "journalUnlocked")
+        UserDefaults.standard.removeObject(forKey: "hintsUsedThisChamber")
+        UserDefaults.standard.removeObject(forKey: "attemptsThisChamber")
+        UserDefaults.standard.removeObject(forKey: "actionsThisChamber")
+        
+        // Clear caches
+        journalCache.clearCache()
+        attemptTracker.clearAll()
+        RoomsCache.shared.clearCache()
+        
+        // Reset in-memory state to defaults
+        sessionId = nil
+        currentRoomId = "room_01"
+        gamePhase = .playing
+        turnCount = 0
+        hintsUnlocked = 0
+        messages.removeAll()
+        currentTraits = PlayerTraits()
+        journeyStats = JourneyStats()
+        keyDecisions.removeAll()
+        journalUnlocked.removeAll()
+        lastUnlockedChapter = nil
+        hintsUsedThisChamber = 0
+        attemptsThisChamber = 0
+        actionsThisChamber = 0
+        currentAsciiArt = nil
+        errorMessage = nil
+        
+        #if DEBUG
+        print("🗑️ Game state cleared (storage + in-memory state)")
+        #endif
+    }
+    
+    // MARK: - Recovery Data
+    
+    /// Build recovery data for session restoration
+    func buildRecoveryData() -> RecoveryData {
+        // Convert PlayerTraits to dictionary
+        let traitsDict: [String: Double] = [
+            "logical_thinking": currentTraits.logicalThinking,
+            "creative_thinking": currentTraits.creativeThinking,
+            "observation": currentTraits.observation,
+            "memory": currentTraits.memory,
+            "empathy": currentTraits.empathy,
+            "courage": currentTraits.courage,
+            "patience": currentTraits.patience,
+            "trust": currentTraits.trust,
+            "impulsivity": currentTraits.impulsivity,
+            "pragmatism": currentTraits.pragmatism,
+            "curiosity": currentTraits.curiosity,
+            "integrity": currentTraits.integrity
+        ]
+        
+        // Convert JourneyStats to dictionary
+        let statsDict: [String: Int] = [
+            "chambers_completed": journeyStats.chambersCompleted,
+            "hints_used": journeyStats.hintsUsed,
+            "wrong_attempts": journeyStats.wrongAttempts,
+            "total_actions": journeyStats.totalActions,
+            "total_time_seconds": journeyStats.totalTimeSeconds
+        ]
+        
+        // Convert KeyDecisions to array of dictionaries
+        let decisionsArray: [[String: String]]? = keyDecisions.isEmpty ? nil : keyDecisions.map { decision in
+            [
+                "chamber_id": decision.chamberId,
+                "decision_type": decision.decisionType,
+                "decision_value": decision.decisionValue,
+                "timestamp": ISO8601DateFormatter().string(from: decision.timestamp)
+            ]
+        }
+        
+        // Get completed chambers from ChamberAttemptTracker
+        let completedChamberIds = attemptTracker.getCompletedChamberIds()
+        
+        return RecoveryData(
+            traits: traitsDict,
+            journeyStats: statsDict,
+            keyDecisions: decisionsArray,
+            journalUnlocked: journalUnlocked.isEmpty ? nil : journalUnlocked,
+            chambersCompleted: completedChamberIds.isEmpty ? nil : completedChamberIds,
+            hintsUsedThisChamber: hintsUsedThisChamber,
+            attemptsThisChamber: attemptsThisChamber,
+            actionsThisChamber: actionsThisChamber
+        )
+    }
+    
+    // MARK: - New Journey
+    
+    /// Reset all game progress and start fresh
+    func startNewJourney(roomId: String = "room_01") {
+        // Clear all persisted data
+        clearGameState()
+        
+        // Reset in-memory state
+        messages.removeAll()
+        sessionId = nil
+        currentRoomId = roomId
+        gamePhase = .playing
+        turnCount = 0
+        hintsUnlocked = 0
+        streamingNarration = ""
+        currentTraits = PlayerTraits()
+        journeyStats = JourneyStats()
+        keyDecisions = []
+        journalUnlocked = []
+        lastUnlockedChapter = nil
+        hintsUsedThisChamber = 0
+        attemptsThisChamber = 0
+        actionsThisChamber = 0
+        currentAsciiArt = nil
+        errorMessage = nil
+        
+        // Start new game
+        startNewGame(roomId: roomId)
+        
+        #if DEBUG
+        print("🔄 Started new journey")
+        #endif
     }
 }
