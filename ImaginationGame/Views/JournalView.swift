@@ -184,10 +184,9 @@ struct JournalView: View {
     }
     
     private func errorView(_ message: String) -> some View {
-        VStack(spacing: 16) {
-            // Check if this is a session expired error
-            let isSessionExpired = message.contains("expired") || message.contains("not found")
-            
+        let isSessionExpired = message.contains("expired") || message.contains("not found")
+        
+        return VStack(spacing: 16) {
             Image(systemName: isSessionExpired ? "clock.badge.exclamationmark" : "exclamationmark.triangle")
                 .font(.system(size: 48))
                 .foregroundColor(isSessionExpired ? .orange : .red)
@@ -210,9 +209,9 @@ struct JournalView: View {
                     .padding(.horizontal)
                     .padding(.top, 8)
             } else {
-                        Button(action: {
-                            viewModel.refresh(sessionId: sessionId)
-                        }) {
+                Button(action: {
+                    viewModel.refresh(sessionId: sessionId)
+                }) {
                     Text("Retry")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                         .foregroundColor(.black)

@@ -334,23 +334,24 @@ struct GameView: View {
             // Input field with scrolling text
             HStack(alignment: .center, spacing: 12) {
                 ZStack(alignment: .leading) {
-                    // Placeholder text
-                    if actionText.isEmpty {
-                        Text("Enter your action...")
-                            .font(.system(size: 16, design: .monospaced))
-                            .foregroundColor(.terminalGreen.opacity(0.5))
-                            .padding(.horizontal, 16)
-                    }
-                    
                     TextEditor(text: $actionText)
                         .font(.system(size: 16, design: .monospaced))
                         .foregroundColor(.cyan)  // Blue text for user input!
                         .scrollContentBackground(.hidden)
-                        .background(Color.terminalBlack)
+                        .background(Color.clear)
                         .frame(height: 44)
                         .padding(.horizontal, 8)
                         .focused($isInputFocused)
                         .disabled(!viewModel.canSendAction)
+                    
+                    // Placeholder on top (passes taps through)
+                    if actionText.isEmpty {
+                        Text("What do you do?")
+                            .font(.system(size: 16, design: .monospaced))
+                            .foregroundColor(.cyan.opacity(0.5))
+                            .padding(.horizontal, 16)
+                            .allowsHitTesting(false)
+                    }
                 }
                 .background(Color.terminalBlack)
                 .overlay(

@@ -146,6 +146,11 @@ class JournalViewModel: ObservableObject {
             .store(in: &cancellables)
     }
     
+    /// Get all chapters sorted by order_index (story order)
+    var sortedChapters: [JournalChapter] {
+        return chapters.sorted { $0.orderIndex < $1.orderIndex }
+    }
+    
     /// Get unlocked chapters only
     var unlockedChapters: [JournalChapter] {
         return chapters.filter { $0.isUnlocked }
