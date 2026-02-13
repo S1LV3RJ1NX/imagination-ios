@@ -8,6 +8,8 @@
 
 /* Begin PBXFileReference section */
 		0555DC672F28BD6E00AE239A /* ImaginationGame.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ImaginationGame.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0555DDE32F3EF52900AE239A /* Configuration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; name = Configuration.storekit; path = ImaginationGame/Configuration.storekit; sourceTree = "<group>"; };
+		0555DDE42F3EF54100AE239A /* Configuration.storekit */ = {isa = PBXFileReference; lastKnownFileType = text; name = Configuration.storekit; path = ImaginationGame/Configuration.storekit; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -45,6 +47,8 @@
 		0555DC5E2F28BD6E00AE239A = {
 			isa = PBXGroup;
 			children = (
+				0555DDE32F3EF52900AE239A /* Configuration.storekit */,
+				0555DDE42F3EF54100AE239A /* Configuration.storekit */,
 				0555DC692F28BD6E00AE239A /* ImaginationGame */,
 				0555DC682F28BD6E00AE239A /* Products */,
 			);

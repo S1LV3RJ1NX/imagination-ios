@@ -426,6 +426,43 @@ struct SettingsSheet: View {
                             .background(Color.green.opacity(0.3))
                             .padding(.vertical, 8)
                         
+                        // Restore Purchase
+                        VStack(spacing: 8) {
+                            Button(action: {
+                                Task {
+                                    await StoreManager.shared.restorePurchases()
+                                }
+                            }) {
+                                HStack {
+                                    Image(systemName: "arrow.clockwise.circle.fill")
+                                        .font(.system(size: 16))
+                                    
+                                    Text("RESTORE PURCHASE")
+                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                }
+                                .foregroundColor(Color.green)
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.green.opacity(0.1))
+                                .cornerRadius(8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color.green.opacity(0.5), lineWidth: 1)
+                                )
+                            }
+                            .padding(.horizontal, 24)
+                            
+                            Text("Reinstalled? Restore your purchase here.")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Color.gray)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 24)
+                        }
+                        
+                        Divider()
+                            .background(Color.green.opacity(0.3))
+                            .padding(.vertical, 8)
+                        
                         VStack(spacing: 16) {
                             // Reset Progress
                             Button(action: {

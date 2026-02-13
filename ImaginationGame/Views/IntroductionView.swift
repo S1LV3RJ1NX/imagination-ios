@@ -2,17 +2,20 @@
 //  IntroductionView.swift
 //  ImaginationGame
 //
-//  4-screen onboarding experience
-//  Prepares players for the journey and emphasizes permanence
+//  4-screen onboarding experience with integrated purchase flow (Option C)
 //
 
+import StoreKit
 import SwiftUI
+
+// MARK: - Main Introduction View
 
 struct IntroductionView: View {
     @State private var currentScreen = 0
     @State private var showSkipAlert = false
     @State private var showSkipPrompt = false
     @State private var hasCheckedSkip = false
+    @StateObject private var storeManager = StoreManager.shared
     let onComplete: () -> Void
     
     var body: some View {
@@ -29,9 +32,9 @@ struct IntroductionView: View {
                 Screen3FinalPreparation(onNext: { currentScreen = 3 })
                     .tag(2)
                 
-                Screen4ImportantRules(
+                Screen4BeginJourney(
+                    storeManager: storeManager,
                     onBeginJourney: {
-                        // Mark intro as seen
                         UserDefaults.standard.set(true, forKey: "hasSeenIntro")
                         onComplete()
                     },
@@ -43,35 +46,32 @@ struct IntroductionView: View {
             .indexViewStyle(.page(backgroundDisplayMode: .always))
         }
         .alert("Not Ready Yet?", isPresented: $showSkipAlert) {
-            Button("Continue Intro", role: .cancel) {
-                // User reconsidered - stay on intro
-            }
+            Button("Continue Intro", role: .cancel) { }
             Button("Close App", role: .destructive) {
-                // Exit the app
                 exit(0)
             }
         } message: {
             Text("Take your time. The Chambers will be here when you're ready.")
         }
         .alert("Skip Introduction?", isPresented: $showSkipPrompt) {
-            Button("Watch Again", role: .cancel) {
-                // Continue with intro
-            }
+            Button("Watch Again", role: .cancel) { }
             Button("Skip to Game") {
-                // Mark as seen and skip
-                UserDefaults.standard.set(true, forKey: "hasSeenIntro")
-                onComplete()
+                if storeManager.isUnlocked {
+                    UserDefaults.standard.set(true, forKey: "hasSeenIntro")
+                    onComplete()
+                } else {
+                    // Jump to the final screen with purchase
+                    currentScreen = 3
+                }
             }
         } message: {
             Text("You've seen the introduction before. Would you like to skip directly to the first chamber?")
         }
         .onAppear {
-            // Check if user has seen intro before
             if !hasCheckedSkip {
                 hasCheckedSkip = true
                 let hasSeenIntro = UserDefaults.standard.bool(forKey: "hasSeenIntro")
                 if hasSeenIntro {
-                    // Show skip prompt after a short delay
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         showSkipPrompt = true
                     }
@@ -134,7 +134,7 @@ struct Screen1Welcome: View {
     }
 }
 
-// MARK: - Screen 2: How It Works
+// MARK: - Screen 2: How This Works
 
 struct Screen2HowItWorks: View {
     @State private var showSection1 = false
@@ -268,9 +268,10 @@ struct Screen3FinalPreparation: View {
     }
 }
 
-// MARK: - Screen 4: Important Rules (Final Decision)
+// MARK: - Screen 4: Begin Journey (with integrated purchase)
 
-struct Screen4ImportantRules: View {
+struct Screen4BeginJourney: View {
+    @ObservedObject var storeManager: StoreManager
     let onBeginJourney: () -> Void
     let onNotYet: () -> Void
     @State private var warningPulsing = false
@@ -329,28 +330,59 @@ struct Screen4ImportantRules: View {
                 
                 // Buttons
                 VStack(spacing: 16) {
+                    // Primary: Begin Journey (with price if not yet purchased)
                     Button(action: {
                         let generator = UIImpactFeedbackGenerator(style: .medium)
                         generator.impactOccurred()
-                        onBeginJourney()
+                        
+                        if storeManager.isUnlocked {
+                            // Already purchased — go straight in
+                            onBeginJourney()
+                        } else {
+                            // Trigger Apple payment sheet directly
+                            Task {
+                                await storeManager.purchase()
+                                if storeManager.isUnlocked {
+                                    onBeginJourney()
+                                }
+                            }
+                        }
                     }) {
-                        Text("Begin Journey")
-                            .font(.system(size: 18, weight: .bold, design: .monospaced))
-                            .foregroundColor(.black)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(
-                                LinearGradient(
-                                    colors: [Color(red: 1.0, green: 0.84, blue: 0.0), Color(red: 1.0, green: 0.71, blue: 0.0)],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                )
+                        HStack {
+                            if storeManager.isPurchasing {
+                                ProgressView()
+                                    .tint(.black)
+                                    .padding(.trailing, 4)
+                            }
+                            
+                            Text(purchaseButtonText)
+                                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                                .foregroundColor(.black)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 1.0, green: 0.84, blue: 0.0), Color(red: 1.0, green: 0.71, blue: 0.0)],
+                                startPoint: .leading,
+                                endPoint: .trailing
                             )
-                            .cornerRadius(12)
-                            .shadow(color: buttonGlowing ? .yellow.opacity(0.8) : .yellow.opacity(0.3), radius: 15)
-                            .scaleEffect(buttonGlowing ? 1.05 : 1.0)
+                        )
+                        .cornerRadius(12)
+                        .shadow(color: buttonGlowing ? .yellow.opacity(0.8) : .yellow.opacity(0.3), radius: 15)
+                        .scaleEffect(buttonGlowing ? 1.02 : 1.0)
+                    }
+                    .disabled(storeManager.isPurchasing)
+                    
+                    // Error message
+                    if let error = storeManager.errorMessage {
+                        Text(error)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.red.opacity(0.8))
+                            .multilineTextAlignment(.center)
                     }
                     
+                    // Not Yet button
                     Button(action: onNotYet) {
                         Text("Not Yet")
                             .font(.system(size: 16, weight: .semibold, design: .monospaced))
@@ -362,6 +394,21 @@ struct Screen4ImportantRules: View {
                                 RoundedRectangle(cornerRadius: 12)
                                     .stroke(Color.white.opacity(0.5), lineWidth: 2)
                             )
+                    }
+                    
+                    // Restore Purchase link
+                    Button(action: {
+                        Task {
+                            await storeManager.restorePurchases()
+                            if storeManager.isUnlocked {
+                                onBeginJourney()
+                            }
+                        }
+                    }) {
+                        Text("Restore Purchase")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(.gray)
+                            .underline()
                     }
                 }
                 .padding(.horizontal, 24)
@@ -376,6 +423,19 @@ struct Screen4ImportantRules: View {
                 buttonGlowing = true
             }
         }
+    }
+    
+    private var purchaseButtonText: String {
+        if storeManager.isPurchasing {
+            return "Purchasing..."
+        }
+        if storeManager.isUnlocked {
+            return "Begin Journey"
+        }
+        if let product = storeManager.product {
+            return "Begin Journey — \(product.displayPrice)"
+        }
+        return "Begin Journey — $2.99"
     }
 }
 
@@ -397,6 +457,25 @@ struct IntroText: View {
     }
 }
 
+struct BulletPoint: View {
+    let text: String
+    
+    init(_ text: String) {
+        self.text = text
+    }
+    
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("•")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundColor(.orange)
+            Text(text)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white)
+        }
+    }
+}
+
 struct FeatureSection: View {
     let icon: String
     let title: String
@@ -414,10 +493,10 @@ struct FeatureSection: View {
                 .foregroundColor(.terminalGreen)
             
             Text(description)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
-                .lineSpacing(3)
+                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
@@ -440,32 +519,13 @@ struct InfoSection: View {
                 .foregroundColor(.terminalGreen)
             
             Text(description)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(.white.opacity(0.8))
                 .multilineTextAlignment(.center)
-                .lineSpacing(3)
+                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.vertical, 6)
-    }
-}
-
-struct BulletPoint: View {
-    let text: String
-    
-    init(_ text: String) {
-        self.text = text
-    }
-    
-    var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Text("•")
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(.orange)
-            Text(text)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(.white)
-        }
     }
 }
 
