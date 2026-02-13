@@ -362,9 +362,9 @@ struct GameView: View {
                 Button(action: sendAction) {
                     Image(systemName: "arrow.right.circle.fill")
                         .font(.system(size: 32))
-                        .foregroundColor(viewModel.canSendAction && !actionText.isEmpty ? .terminalGreen : .gray)
+                        .foregroundColor(viewModel.canSendAction && hasValidInput ? .terminalGreen : .gray)
                 }
-                .disabled(!viewModel.canSendAction || actionText.isEmpty)
+                .disabled(!viewModel.canSendAction || !hasValidInput)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 16)
@@ -375,11 +375,19 @@ struct GameView: View {
     // MARK: - Actions
     
     private func sendAction() {
-        let action = actionText.trimmingCharacters(in: .whitespaces)
-        guard !action.isEmpty else { return }
+        let action = actionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Block empty, whitespace-only, or punctuation-only inputs
+        let hasLetterOrDigit = action.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
+        guard !action.isEmpty, hasLetterOrDigit else { return }
         
         viewModel.sendAction(action)
         actionText = ""
+    }
+    
+    /// True when the text field contains at least one letter or digit.
+    private var hasValidInput: Bool {
+        let trimmed = actionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.unicodeScalars.contains { CharacterSet.alphanumerics.contains($0) }
     }
     
     // MARK: - Helpers
